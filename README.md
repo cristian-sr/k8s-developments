@@ -2,7 +2,7 @@
 description: Based on Golden Guide to k8s application development
 ---
 
-# Kubernetes App Development
+# k8s-developments
 
 ## **Containers**
 
@@ -25,5 +25,68 @@ COPY . .
 CMD [ "node", "index.js" ] 
 ```
 
+Then, let's write a simple Node.js web server. Create the following in a file called **index.js**.
 
+```text
+# index.js
+var http = require('http');
+var server = http.createServer(function(request, response) {
+ response.statusCode = 200;
+ response.setHeader('Content-Type', 'text/plain');
+ response.end('Welcome to the Golden Guide to Kubernetes
+Application Development!');
+});
+server.listen(3000, function() {
+ console.log('Server running on port 3000');
+});
+```
+
+In the directory, open a new shell and build the Docker image.
+
+```text
+$ docker build . -t node-welcome-app
+Sending build context to Docker daemon 4.096kB
+Step 1/4 : FROM node:carbon
+carbon: Pulling from library/node
+1c7fe136a31e: Pull complete
+ece825d3308b: Pull complete
+06854774e2f3: Pull complete
+f0db43b9b8da: Pull complete
+aa50047aad93: Pull complete
+42b3631d8d2e: Pull complete
+93c1a8d9f4d4: Pull complete
+5fe5b35e5c3f: Pull complete
+Digest:
+sha256:420104c1267ab7a035558b8a2bc13539741831ac4369954031e0142b565fb7b5
+Status: Downloaded newer image for node:carbon
+ ---> ba6ed54a3479
+Step 2/4 : WORKDIR /app
+Removing intermediate container eade7b6760bd
+ ---> a8aabdb24119
+Step 3/4 : COPY . .
+ ---> 5568107f98fc
+Step 4/4 : CMD [ "node", "index.js" ]
+ ---> Running in 9cdac4a2a005
+Removing intermediate container 9cdac4a2a005
+ ---> a3af77202920
+Successfully built a3af77202920
+Successfully tagged node-welcome-app:latest
+```
+
+Now that we've built and tagged the Docker image, we can run a container instantiated from the image using our local Docker engine.
+
+```text
+$ docker run -d -p 3000 node-welcome-app
+a7afe78a7213d78d98dba732d53388f67ed0c3d2317e5a1fd2e1f680120b3d15
+$ docker ps
+CONTAINER ID IMAGE COMMAND PORTS
+a7afe78a7213 node-welcome-app "node index.js" 0.0.0.0:32772->3000
+```
+
+The output of **`docker ps`** tells us that a container with ID **a7afe78a7213** is running the **node-welcome-app** image we just built. We can access this container using port 32772 on localhost, which Docker will forward to the container's port 3000, where our application server is listening.
+
+```text
+$ curl 'http://localhost:32772'
+Welcome to the Golden Guide to Kubernetes Application Development!
+```
 
