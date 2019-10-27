@@ -4,6 +4,9 @@ description: Based on Golden Guide to k8s application development
 
 # k8s-developments
 
+
+To follow the all instructions use my [gitbook](https://santillanrodriguezcristian.gitbook.io/k8s-development/)
+=======
 ## **Containers**
 
 ### Docker and containers
@@ -24,4 +27,5 @@ COPY . .
 # Start your application
 CMD [ "node", "index.js" ]
 ```
+
 
