@@ -2,4 +2,5 @@
 
 * [k8s-developments](README.md)
 * [LICENSE](license.md)
+* [Pods](pods.md)
 
