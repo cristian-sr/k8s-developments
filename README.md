@@ -4,12 +4,13 @@ description: Based on Golden Guide to k8s application development
 
 # k8s-developments
 
+## k8s-developments
 
-To follow the all instructions use my [gitbook](https://santillanrodriguezcristian.gitbook.io/k8s-development/)
-=======
-## **Containers**
+## To follow the all instructions use my [gitbook](https://santillanrodriguezcristian.gitbook.io/k8s-development/)
 
-### Docker and containers
+### **Containers**
+
+#### Docker and containers
 
 Containerization is packaging an application, it's dependencies, and it's configuration into a single unit. This unit is called an image. The image is then used as a template to construct live, running instances of this image. These running instances are called containers. A container consists of the image, a read-write filesystem, network ports, resource limits, and other runtime configuration. Docker is the most popular way to build images and run containers, and is what we use in this book.
 
@@ -27,5 +28,4 @@ COPY . .
 # Start your application
 CMD [ "node", "index.js" ]
 ```
-
 
