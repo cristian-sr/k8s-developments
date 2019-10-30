@@ -1,0 +1,161 @@
+#!/usr/bin/env groovy
+
+def build_args = []
+
+properties([
+  parameters([
+    string(defaultValue: '593202966396', description: 'ECR Registry ID', name: 'REGISTRY_ID'),
+    string(defaultValue: 'react-pdp', description: 'ECR Registry Repo', name: 'REGISTRY_REPO'),
+    string(defaultValue: ".", description: 'The source folder where the app is', name: "BASE_CONTEXT"),
+    string(defaultValue: "./Dockerfile", description: 'The Dockerfile path for building the image (relative to the BASE_CONTEXT)', name: 'DOCKERFILE_PATH'),
+    string(defaultValue: "", description: 'Docker Build Arguments', name: 'DOCKER_BUILD_ARGS'),
+    string(defaultValue: env.BRANCH_NAME.startsWith('PR') ? env.CHANGE_BRANCH : env.BRANCH_NAME, description: 'Git Branch', name: 'GIT_BRANCH'),
+    string(defaultValue: "", description: 'MMLF_HOST', name: 'MMLF_HOST'),
+  ])
+])
+
+node('docker-jenkins-agent') {
+    try {
+        notifyBuild('STARTED')
+
+        stage('Parameter Setup') {
+            env = "react-pdp"
+            registry_id = params.REGISTRY_ID
+            registry_repo = params.REGISTRY_REPO
+            base_context = params.BASE_CONTEXT
+            path_to_dockerfile = params.DOCKERFILE_PATH
+            docker_build_args = params.DOCKER_BUILD_ARGS
+            git_branch = params.GIT_BRANCH
+            git_branch_dns = params.GIT_BRANCH.replaceAll("_", "-").toLowerCase();
+            stage_cluster = "k8s-staging.mmlafleur.com"
+            final_dns = git_branch_dns + "." + env + "." + stage_cluster
+            mmlf_host = params.MMLF_HOST?.trim()
+        }
+
+        stage('Checkout Repository') {
+            checkout(
+            [
+                $class: 'GitSCM',
+                branches: [[name: "*/${git_branch}"]],
+                doGenerateSubmoduleConfigurations: false,
+                extensions: [[$class: 'SubmoduleOption',
+                    disableSubmodules: false,
+                    parentCredentials: true,
+                    recursiveSubmodules: true,
+                    reference: '',
+                    trackingSubmodules: false]],
+                submoduleCfg: [],
+                userRemoteConfigs:
+                [[credentialsId: 'github-credentials',
+                url: "git@github.com:mmlafleur/${env}.git"]]
+            ]
+            )
+        }
+
+        stage('Get Git SHA for Image Name') {
+            sh "git rev-parse HEAD > .git/commit-id"
+            git_commit_sha = readFile('.git/commit-id').trim()
+            final_image = "${registry_id}.dkr.ecr.us-east-1.amazonaws.com/mmlafleur/${registry_repo}:${git_branch_dns}-${git_commit_sha}"
+        }
+
+        stage('Set Build Display Name') {
+            currentBuild.displayName = "#${currentBuild.number}: ${env} ${git_branch} ${git_commit_sha}"
+        }
+
+        stage('Build Image') {
+            dir(base_context) {
+            if(mmlf_host) {
+                sh """
+                sed -i "s/REACT_APP_MMLF_HOST.*\$/REACT_APP_MMLF_HOST=\"${mmlf_host}\"/g" envs/env.production
+                """
+            }
+            sh """
+                docker build --network container:\$(docker ps | grep \$(hostname) | grep k8s_POD | cut -d\" \" -f1) --build-arg X_ENV=production --build-arg X_NPM_INSTALL_ARG=\"--production\" --build-arg X_BRANCH=${git_branch_dns} -t ${final_image} --no-cache .
+            """
+            }
+        }
+        // # ENV=production NAME=${final_image} docker-compose build --no-cache --compress prod
+
+        stage('Run Tests') {
+        dir(base_context) {
+            sh """
+            docker run --entrypoint "/bin/bash" $final_image -c "CI=test npm run test"
+            """
+        }
+        }
+
+        stage('ECR Registry Login') {
+            sh """
+            `AWS_DEFAULT_REGION=us-east-1 aws ecr get-login --region us-east-1 --registry-ids ${registry_id} | sed 's/-e none//g'`
+            """
+        }
+
+        stage('Push Image') {
+            sh """
+            docker push ${final_image}
+            """
+        }
+
+        stage('Deploy to Staging') {
+            sh """
+            cd ./deploy/${env}
+            helm upgrade --install ${git_branch_dns} --namespace ${git_branch_dns} --set ingress.dns=${final_dns} --set image.tag=${git_branch_dns}-${git_commit_sha} --set subdomain=${git_branch_dns} --set app.ingress.dns=${git_branch_dns}.${env}.${stage_cluster} -f values.yaml . --recreate-pods
+            """
+        }
+    } catch (e) {
+        // If there was an exception thrown, the build failed
+        currentBuild.result = "FAILED"
+        throw e
+    } finally {
+        // Success or failure, always send notifications
+        notifyBuild(currentBuild.result)
+    }
+}
+
+def notifyBuild(String buildStatus = 'STARTED') {
+  // build status of null means successful
+  buildStatus =  buildStatus ?: 'SUCCESSFUL'
+
+  // Default values
+  def colorName = 'RED'
+  def colorCode = '#FF0000'
+  def subject = "${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'"
+  def summary = "${subject} (${env.BUILD_URL})"
+  def details = """<p>STARTED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+    <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>"""
+
+  // Override default values based on build status
+  if (buildStatus == 'STARTED') {
+    color = 'YELLOW'
+    colorCode = '#FFFF00'
+  } else if (buildStatus == 'SUCCESSFUL') {
+    color = 'GREEN'
+    colorCode = '#00FF00'
+  } else {
+    color = 'RED'
+    colorCode = '#FF0000'
+  }
+
+  // Send notifications
+  slackSend (color: colorCode, message: summary)
+
+  emailext(
+      subject: subject,
+      body: details,
+      recipientProviders: [[$class: 'DevelopersRecipientProvider']]
+    )
+}
+
+def gitCheckThatOut(String branch, String vcsUrl) {
+    branch =  branch ?: 'master'
+    // cleanup
+    gitClean()
+    // checkout
+    git branch: "${branch}", url: "${vcsUrl}"
+    // get last tag
+    sh "git describe --abbrev=0 --tags > .git/tagName"
+    tagName = readFile('.git/tagName')
+    echo "${tagName}"
+    // set DisplayName
+    currentBuild.displayName = tagName
+}
